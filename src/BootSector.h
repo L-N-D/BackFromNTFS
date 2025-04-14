@@ -100,7 +100,15 @@ class BootSector{
         DWORDLONG getTotalSectors() const { return totalSectors; }
         DWORDLONG getClusterMFT() const { return clusterMFT; }
         DWORDLONG getClusterMFT_Mirror() const { return clusterMFT_Mirror; }
-        DWORD getSizeRecord() const { return sizeRecord; }
+        DWORD getSizeRecord() const { 
+            
+            if ((char)sizeRecord < 0) {
+                return 1 << abs((char)sizeRecord);
+            }
+            
+            return sizeRecord; 
+            
+        }
         DWORD getSizeIndexBuffer() const { return sizeIndexBuffer; }
         DWORD getVolumeSerial() const { return volumSerial; }
         const char* getExecutableCode() const { return excutableCode; }
@@ -124,7 +132,6 @@ class BootSector{
                 DWORD errCode = GetLastError();
                 cout << "Cannot open drive: " << driveName << endl;
                 cout << "Error code: " << errCode << endl;
-                cout << "Unable to read Bootsector |class BootSector|" << endl;
                 return;
             }
 
@@ -140,7 +147,6 @@ class BootSector{
                 return;
             }
 
-            // Gán dữ liệu từ buffer vào các trường
             memcpy(jumpBoot, buffer + 0x00, 3);
             memcpy(ID, buffer + 0x03, 8);
             bytesPerSector = *reinterpret_cast<WORD*>(buffer + 0x0B);
