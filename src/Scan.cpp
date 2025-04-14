@@ -145,14 +145,14 @@ bool getResident(BYTE* record, DWORD recordSize){
         if (attrType == 0xFFFFFFFF) break;
 
         BYTE nonResident = *(record + attrOffset + 8);
-        if (attrType == 0x80 && nonResident == 0x00) {
+
+        if (attrType == 0x10 && nonResident == 0x00) {
             return true;
-        }else{
-            return false;
         }
 
         DWORD attrLen = *reinterpret_cast<DWORD*>(record + attrOffset + 4);
         if (attrLen == 0) break;
+
         attrOffset += attrLen;
     }
     return false;
@@ -194,7 +194,7 @@ vector<File> ScanDeleted(string driveName, BootSector bootsector) {
             bool isres = getResident(buffer, recordSize);
             DWORD cluster = getDataCluster(buffer, recordSize);
             ULONGLONG count = getClusterLength(buffer, recordSize);
-            cout << offset << endl;
+            // cout << offset << endl;
             if (!name.empty()) list.emplace_back(name, size, ext, offset, isres, cluster, count);
         }
         offset += recordSize;
