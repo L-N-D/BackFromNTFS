@@ -160,7 +160,7 @@ bool getResident(BYTE* record, DWORD recordSize){
 }
 
 // Scan all deleted file
-vector<File> scanDelete(string driveName, BootSector bootsector) {
+vector<File> ScanDeleted(string driveName, BootSector bootsector) {
     vector<File> list;
     HANDLE drive = CreateFileA(driveName.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
     if (drive == INVALID_HANDLE_VALUE) return list;
