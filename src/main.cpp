@@ -1,4 +1,3 @@
-#include <iostream>
 #include "BootSector.h"
 #include "Scan.h"
 #include "Restore_Engine.h"
@@ -26,6 +25,10 @@ void printDeleted(vector<File> deletedFiles){
         cout << "[" << i + 1 << "]. " << deletedFiles[i].getFileName() << " (" << deletedFiles[i].getExtend() << ") " << deletedFiles[i].getOffset() << " | " << deletedFiles[i].getClusterLength() << endl;
     }
 
+}
+
+bool isNumber(const string& s) {
+    return !s.empty() && all_of(s.begin(), s.end(), ::isdigit);
 }
 
 int main() {
@@ -84,17 +87,18 @@ int main() {
                     case 2:{
                         cout << "Command list:" << endl;
                         for (int j = 0; j < options.size(); j++){
-                            cout << options[i] << endl;
+                            cout << options[j] << endl;
                         }
                         cout << endl;
                         break;
                     }
                     case 3:{
                         printDeleted(deletedFiles);
-                        cout << "Do you want to restore any file in this lisk? (y/n): ";
-                        char choice;
+                        cout << "Do you want to restore any file in this list? (y/n): ";
+                        string choice;
                         cin >> choice;
-                        if (choice == 'y' | choice == 'Y'){
+                        cin.ignore();
+                        if (choice == "y" || choice == "Y"){
 
                             while (true){
 
@@ -105,16 +109,19 @@ int main() {
                                 if (input == "@@exit"){
                                     break;
                                 }
-
-                                int index = stoi(input);
-                                if (index >= 1 && index <= (int)deletedFiles.size()) {
-                                    if (restoreClone(driveName, deletedFiles[index - 1], bootsector)){
-                                        cout << " [+] Restore file successfully" << endl;
-                                    }else{
-                                        cout << "[-] Fail to restore file" << endl;
+                                if (isNumber(input)) {
+                                    int index = stoi(input);
+                                    if (index >= 1 && index <= (int)deletedFiles.size()) {
+                                        if (restoreClone(driveName, deletedFiles[index - 1], bootsector)) {
+                                            cout << " [+] Restore file successfully" << endl;
+                                        } else {
+                                            cout << " [-] Fail to restore file" << endl;
+                                        }
+                                    } else {
+                                        cout << "Invalid index." << endl;
                                     }
                                 } else {
-                                    cout << "Invalid index." << endl;
+                                    cout << "Invalid input. Please enter a valid number." << endl;
                                 }
                                 
                             }
