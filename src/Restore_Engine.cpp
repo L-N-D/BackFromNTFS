@@ -1,54 +1,7 @@
 #include "Restore_Engine.h"
 
-vector<vector<BYTE>> getData(BYTE* buffer, DWORD recordSize) {
-    vector<vector<BYTE>> fileData;
-
-    // Get start offset of list attributes
-    DWORD attrOffset = *reinterpret_cast<DWORD*>(buffer + 0x14);
-
-    // check attribute list
-    while (attrOffset < recordSize) {
-        DWORD attrType = *reinterpret_cast<DWORD*>(buffer + attrOffset);
-        // end of attribute list
-        if (attrType == 0xFFFFFFFF) {
-            break;
-        }
-
-        // Check for DATA attribute (0x80)
-        if (attrType == 0x80) {
-            // Check if attribute is resident or non-resident
-            BYTE flags = *(buffer + attrOffset + 0x08);
-            bool isResident = !(flags & 0x01);  // Bit 0 clear means resident
-
-            if (isResident) {
-                // Handle resident attribute
-                DWORD contentSize = *reinterpret_cast<DWORD*>(buffer + attrOffset + 0x10);
-                WORD contentOffset = *reinterpret_cast<WORD*>(buffer + attrOffset + 0x14);
-
-                // Point to data of file
-                BYTE* contentPointer = buffer + attrOffset + contentOffset;
-
-                // Create a vector to store this chunk of data
-                vector<BYTE> cache(contentPointer, contentPointer + contentSize);
-                fileData.push_back(cache);
-            }
-            // Non-resident attributes are handled in restoreClone
-        }
-
-        // continue to next attribute
-        DWORD attrLength = *reinterpret_cast<DWORD*>(buffer + attrOffset + 4);
-        if (attrLength == 0) {
-            // cout << "Warning: Found attribute with zero length at offset " << attrOffset << endl;
-            break;
-        }
-        attrOffset += attrLength;
-    }
-
-    return fileData;
-}
-
 bool restoreClone(string driveName, File file, BootSector bootsector) {
-    // Open disk
+
     HANDLE drive = CreateFileA(
         driveName.c_str(),
         GENERIC_READ,
@@ -60,107 +13,94 @@ bool restoreClone(string driveName, File file, BootSector bootsector) {
     );
 
     if (drive == INVALID_HANDLE_VALUE) {
-        cout << "Unable to open drive " << driveName << endl;
-        cout << "Error code: " << GetLastError() << endl;
+        cout << "Cannot open drive: " << driveName << "\nError code: " << GetLastError() << endl;
         return false;
     }
 
-    // Initial base info of volume
-    DWORD recordSize = bootsector.getSizeRecord();
-    DWORD bytesPerCluster = bootsector.getBytesPerSector() * bootsector.getSectorsPerCluster();
+    WORD recordSize = bootsector.getSizeRecord();
+    if ((char)recordSize < 0) {
+        recordSize = 1 << abs((char)recordSize);
+    }
 
-    // Initial buffer for handling data
+    DWORD bytesPerCluster = bootsector.getBytesPerSector() * bootsector.getSectorsPerCluster();
     BYTE* buffer = new BYTE[recordSize];
-    DWORD bytesRead;
     LARGE_INTEGER offset;
     offset.QuadPart = file.getOffset();
 
-    // ========================================= Start restore process ===============================================================
-    
-    // Read MFT record to get information or data
     SetFilePointerEx(drive, offset, nullptr, FILE_BEGIN);
+    DWORD bytesRead;
     if (!ReadFile(drive, buffer, recordSize, &bytesRead, nullptr)) {
-        cout << "Unable to read MFT record" << endl;
-        cout << "Error: " << GetLastError() << endl;
+        cout << "Cannot read MFT record.\nError code: " << GetLastError() << endl;
         delete[] buffer;
         CloseHandle(drive);
         return false;
     }
 
-    // create restore file
-    string recoName = "RESTORED_" + file.getFileName();
+    // Sửa flag: mark in-use
+    buffer[0x16] = 0x01;
+    buffer[0x17] = 0x00;
+
+    string recoName = "recovered_" + file.getFileName();
     ofstream out(recoName, ios::binary);
-    if (!out.is_open()) {
-        cout << "Unable to create restore file " << recoName << endl;
+    if (!out) {
+        cout << "Cannot create output file: " << recoName << endl;
         delete[] buffer;
         CloseHandle(drive);
         return false;
     }
 
-    bool success = false;
-
-    // handle both resident file and non-resident file
-    if (file.isResident()) {
-        cout << "Processing resident file: " << file.getFileName() << endl;
-        
-        // get data of file
-        vector<vector<BYTE>> fileData = getData(buffer, recordSize);
-        
-        if (fileData.empty()) {
-            cout << "Warning: No data found for resident file!" << endl;
-        } else {
-            // Write all data chunks to the output file
-            size_t totalBytes = 0;
-            for (const auto& chunk : fileData) {
-                out.write(reinterpret_cast<const char*>(chunk.data()), chunk.size());
-                totalBytes += chunk.size();
+    if (file.getdataCluster() == 0 && file.getClusterLength() == 0) {
+        // === RESIDENT FILE ===
+    
+        DWORD attrOffset = *reinterpret_cast<WORD*>(buffer + 0x14);
+        while (attrOffset < recordSize) {
+            DWORD attrType = *reinterpret_cast<DWORD*>(buffer + attrOffset);
+            if (attrType == 0xFFFFFFFF) break;
+    
+            BYTE nonResident = *(buffer + attrOffset + 8);
+            if (attrType == 0x80 && nonResident == 0x00) {
+                // Tìm nội dung resident
+                WORD contentOffset = *reinterpret_cast<WORD*>(buffer + attrOffset + 0x14);
+                DWORD contentSize = *reinterpret_cast<DWORD*>(buffer + attrOffset + 0x10);
+    
+                BYTE* contentPtr = buffer + attrOffset + contentOffset;
+                out.write(reinterpret_cast<char*>(contentPtr), contentSize);
+                break;
             }
-            success = true;
+    
+            DWORD attrLen = *reinterpret_cast<DWORD*>(buffer + attrOffset + 4);
+            if (attrLen == 0) break; // tránh loop vô hạn
+            attrOffset += attrLen;
         }
     } else {
-        cout << "Processing non-resident file: " << file.getFileName() << endl;
-        
-        // Initial some information about data of non-resident file
-        DWORD dataCluster = file.getdataCluster();  // the position of start cluster of file
-        ULONGLONG length = file.getClusterLength(); // the quantity of clusters which contain data of file
-
-        cout << "Starting cluster: " << dataCluster << ", Cluster length: " << length << endl;
-
-        if (length <= 0) {
-            cout << "Warning: File has zero or negative length!" << endl;
-        } else {
-            // Initial a buffer for data
-            BYTE* dataBuffer = new BYTE[bytesPerCluster];
-
-            // write data
-            for (ULONGLONG i = 0; i < length; i++) {
-                LARGE_INTEGER pos;
-                pos.QuadPart = (dataCluster + i) * bytesPerCluster;
-                SetFilePointerEx(drive, pos, nullptr, FILE_BEGIN);
-
-                if (!ReadFile(drive, dataBuffer, bytesPerCluster, &bytesRead, nullptr)) {
-                    cout << "Restore FAIL at cluster " << dataCluster + i << endl;
-                    continue;
-                }
-
-                out.write(reinterpret_cast<char*>(dataBuffer), bytesPerCluster);
+        // === NON-RESIDENT FILE ===
+        DWORD datacluster = file.getdataCluster();
+        ULONGLONG length = file.getClusterLength();
+        DWORD bytesPerCluster = bootsector.getBytesPerSector() * bootsector.getSectorsPerCluster();
+        BYTE* dataBuffer = new BYTE[bytesPerCluster];
+    
+        for (ULONGLONG i = 0; i < length; i++) {
+            LARGE_INTEGER pos;
+            pos.QuadPart = (datacluster + i) * bytesPerCluster;
+            SetFilePointerEx(drive, pos, nullptr, FILE_BEGIN);
+    
+            DWORD bytesRead;
+            if (!ReadFile(drive, dataBuffer, bytesPerCluster, &bytesRead, nullptr) || bytesRead != bytesPerCluster) {
+                cout << "Failed to read cluster: " << (datacluster + i) << endl;
+                continue;
             }
-
-            delete[] dataBuffer;
-            success = true;
+    
+            out.write(reinterpret_cast<char*>(dataBuffer), bytesPerCluster);
         }
+    
+        delete[] dataBuffer;
     }
+    
+    cout << "[+] File recovered successfully: " << recoName << endl;
 
-    // Clean up
-    delete[] buffer;
     out.close();
+    // delete[] dataBuffer;
+    delete[] buffer;
     CloseHandle(drive);
-
-    if (success) {
-        cout << "[+] Restore Completed: " << recoName << endl;
-        return true;
-    } else {
-        cout << "[-] Restore Failed: " << recoName << endl;
-        return false;
-    }
+    return true;
 }
